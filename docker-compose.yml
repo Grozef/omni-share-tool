@@ -1,0 +1,131 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: socialpulse_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+      - ./backend/storage:/var/www/html/storage
+    environment:
+      - APP_ENV=local
+      - APP_DEBUG=true
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - socialpulse
+
+  nginx:
+    image: nginx:alpine
+    container_name: socialpulse_nginx
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./backend:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+    networks:
+      - socialpulse
+
+  mysql:
+    image: mysql:8.0
+    container_name: socialpulse_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: socialpulse
+      MYSQL_USER: socialpulse
+      MYSQL_PASSWORD: secret
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - socialpulse
+
+  redis:
+    image: redis:7-alpine
+    container_name: socialpulse_redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - socialpulse
+
+  horizon:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: socialpulse_horizon
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+    command: php artisan horizon
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - socialpulse
+
+  reverb:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: socialpulse_reverb
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+    command: php artisan reverb:start --host=0.0.0.0 --port=8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - app
+      - redis
+    networks:
+      - socialpulse
+
+  frontend:
+    image: node:20-alpine
+    container_name: socialpulse_frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api
+      - VITE_REVERB_APP_KEY=socialpulse-key
+      - VITE_REVERB_HOST=localhost
+      - VITE_REVERB_PORT=8080
+      - VITE_REVERB_SCHEME=http
+    networks:
+      - socialpulse
+
+  ffmpeg:
+    image: jrottenberg/ffmpeg:4.4-alpine
+    container_name: socialpulse_ffmpeg
+    volumes:
+      - ./backend/storage:/storage
+    entrypoint: ["tail", "-f", "/dev/null"]  # keep alive; called via exec
+    networks:
+      - socialpulse
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  socialpulse:
+    driver: bridge
