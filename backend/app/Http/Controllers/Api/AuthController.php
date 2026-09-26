@@ -14,6 +14,8 @@ class AuthController extends Controller
 {
     public function register(Request $request): JsonResponse
     {
+        abort_unless(config('omnishare.allow_registration'), 403, 'Registration is closed');
+
         $data = $request->validate([
             'name'     => 'required|string|max:255',
             'email'    => 'required|email|unique:users',

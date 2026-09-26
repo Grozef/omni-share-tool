@@ -34,27 +34,22 @@ Laravel Echo et Pusher pour le temps reel, Vite, TypeScript.
 
 Une seconde cible de build produit un widget embarquable (`vite.widget.config.ts`).
 
-## Lancer
+## Etat du depot
 
-Copier les fichiers d'exemple d'environnement (`backend/.env.example`,
-`frontend/.env.example`) et renseigner les identifiants des plateformes voulues.
+Le depot contient le code applicatif (controllers, modeles, services de publication, jobs,
+migrations, vues et stores Vue) mais PAS le squelette necessaire a un build : il ne se lance
+pas en l'etat.
 
-```sh
-docker compose up -d
-```
-
-Le frontend seul :
-
-```sh
-cd frontend
-npm install
-npm run dev
-```
-
-| Commande | Effet |
+| Absent | Consequence |
 |---|---|
-| `npm run build` | Verification `vue-tsc` puis bundle |
-| `npm run build:widget` | Build du widget embarquable |
+| `backend/composer.json`, `artisan`, `bootstrap/app.php`, `public/index.php`, `config/app.php` | `backend/Dockerfile` lance `composer install` sans `composer.json` : pas d'image, pas d'API |
+| `frontend/index.html` | Vite n'a pas de point d'entree (ni `index.html`, ni `build.rollupOptions.input`) |
 
-> Le depot ne versionne pas `backend/composer.json` : les dependances PHP ne sont pas figees
-> ici, l'installation du backend passe par l'image Docker.
+Pour l'executer, il faut partir d'un squelette Laravel et d'un projet Vite + Vue 3, puis y
+recopier ces sources.
+
+## Securite
+
+- Inscription publique fermee par defaut (`ALLOW_REGISTRATION=false`).
+- Upload : types acceptes JPG, PNG, GIF, MP4, MOV, WEBM, controles sur le type detecte (y compris
+  apres assemblage d'un upload par morceaux) ; seul `index.php` est execute par nginx.

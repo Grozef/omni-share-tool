@@ -13,6 +13,8 @@ class AuthControllerTest extends TestCase
     /** @test */
     public function it_registers_a_new_user(): void
     {
+        config(['omnishare.allow_registration' => true]);
+
         $response = $this->postJson('/api/auth/register', [
             'name'                  => 'Jane Doe',
             'email'                 => 'jane@example.com',
@@ -24,6 +26,21 @@ class AuthControllerTest extends TestCase
             ->assertJsonStructure(['user' => ['id', 'name', 'email'], 'token']);
 
         $this->assertDatabaseHas('users', ['email' => 'jane@example.com']);
+    }
+
+    /** @test */
+    public function it_refuses_registration_when_closed(): void
+    {
+        config(['omnishare.allow_registration' => false]);
+
+        $this->postJson('/api/auth/register', [
+            'name'                  => 'Jane Doe',
+            'email'                 => 'jane@example.com',
+            'password'              => 'password123',
+            'password_confirmation' => 'password123',
+        ])->assertStatus(403);
+
+        $this->assertDatabaseMissing('users', ['email' => 'jane@example.com']);
     }
 
     /** @test */

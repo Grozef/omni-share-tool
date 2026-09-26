@@ -11,16 +11,39 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class MediaController extends Controller
 {
+    // Types acceptés (MIME détecté => extension), alignés sur les formats annoncés par MediaUploader
+    private const ALLOWED_MIMES = [
+        'image/jpeg'      => 'jpg',
+        'image/png'       => 'png',
+        'image/gif'       => 'gif',
+        'video/mp4'       => 'mp4',
+        'video/quicktime' => 'mov',
+        'video/webm'      => 'webm',
+    ];
+
     public function __construct(private MediaProcessingService $mediaService) {}
 
     public function upload(Request $request): JsonResponse
     {
+        // Un morceau isolé n'a pas de type reconnaissable : son type est contrôlé après assemblage
+        $isChunk = $request->filled('total_chunks');
+
         $request->validate([
-            'file'           => 'required|file|max:2097152', // 2GB max
-            'publication_id' => 'nullable|exists:publications,id',
+            'file'           => array_merge(
+                ['required', 'file', 'max:2097152'], // 2GB max
+                $isChunk ? [] : ['mimetypes:' . implode(',', array_keys(self::ALLOWED_MIMES))]
+            ),
+            'publication_id' => [
+                'nullable',
+                Rule::exists('publications', 'id')->where('user_id', $request->user()->id),
+            ],
+            'upload_id'      => 'nullable|uuid',
+            'total_chunks'   => 'nullable|integer|min:1|max:10000',
+            'chunk_index'    => 'nullable|required_with:total_chunks|integer|min:0|lt:total_chunks',
         ]);
 
         $file = $request->file('file');
@@ -30,7 +53,7 @@ class MediaController extends Controller
         // Chunked upload support
         $chunkIndex = $request->input('chunk_index');
         $totalChunks = $request->input('total_chunks');
-        $uploadId = $request->input('upload_id', Str::uuid());
+        $uploadId = $request->input('upload_id') ?? (string) Str::uuid();
 
         if ($totalChunks && $chunkIndex !== null) {
             return $this->handleChunkedUpload($request, $uploadId, (int) $chunkIndex, (int) $totalChunks, $type);
@@ -65,16 +88,28 @@ class MediaController extends Controller
             return response()->json(['upload_id' => $uploadId, 'chunk' => $chunkIndex, 'status' => 'partial']);
         }
 
-        // All chunks received — assemble
-        $ext = $request->file('file')->getClientOriginalExtension();
-        $finalPath = "media/originals/{$uploadId}.{$ext}";
-        $finalAbsolute = Storage::path($finalPath);
+        // All chunks received — assemble ($uploadId est un UUID validé : chemins sans traversée)
+        $assembledPath = "media/chunks/{$uploadId}/assembled";
 
-        $out = fopen($finalAbsolute, 'wb');
+        $out = fopen(Storage::path($assembledPath), 'wb');
         for ($i = 0; $i < $totalChunks; $i++) {
             fwrite($out, Storage::get("media/chunks/{$uploadId}/{$i}"));
         }
         fclose($out);
+
+        // Type détecté sur le fichier complet ; l'extension en découle, jamais celle du client
+        $mime = Storage::mimeType($assembledPath);
+        $ext = self::ALLOWED_MIMES[$mime] ?? null;
+
+        if ($ext === null) {
+            Storage::deleteDirectory("media/chunks/{$uploadId}");
+
+            return response()->json(['error' => 'Unsupported media type'], 422);
+        }
+
+        $type = str_starts_with($mime, 'video/') ? 'video' : 'image';
+        $finalPath = "media/originals/{$uploadId}.{$ext}";
+        Storage::move($assembledPath, $finalPath);
 
         // Cleanup chunks
         Storage::deleteDirectory("media/chunks/{$uploadId}");
